@@ -1,0 +1,20 @@
+# Python virtual environments
+.venv/
+venv/
+env/
+
+# Python cache artifacts
+__pycache__/
+*.py[cod]
+
+# Data files and data directories
+*.csv
+*.parquet
+*.feather
+*.h5
+*.hdf5
+*.pkl
+*.pickle
+data/
+Data/
+15MinutesData/

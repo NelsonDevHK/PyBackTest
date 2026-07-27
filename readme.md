@@ -92,6 +92,6 @@ Minimum candle fields:
 ## Notes for Collaboration
 
 - Keep strategy logic isolated from data loading.
-- Save test results per run for reproducibility.11
+- Save test results per run for reproducibility.
 - Version-control strategy parameter sets.
 

@@ -8,7 +8,7 @@ __pycache__/
 *.py[cod]
 
 # Data files and data directories
-*.csv
+*.env
 *.parquet
 *.feather
 *.h5
@@ -17,4 +17,4 @@ __pycache__/
 *.pickle
 data/
 Data/
-15MinutesData/
+

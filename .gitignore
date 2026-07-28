@@ -17,4 +17,12 @@ __pycache__/
 *.pickle
 data/
 Data/
+logs/
+strategy_sample/
+5minutesData/
+
+# Local Windows automation scripts
+install_fetch_task.ps1
+run_fetch_twelvedata_weekday.cmd
+run_fetch_twelvedata_weekday.sh
 

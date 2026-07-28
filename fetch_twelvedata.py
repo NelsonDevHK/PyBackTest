@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 
 load_dotenv()
 
-output_dir = Path(__file__).resolve().parent.parent / "5MinutesData"
+output_dir = Path(__file__).resolve().parent / "5MinutesData"
 output_dir.mkdir(parents=True, exist_ok=True)
 
 #Access the API key from the environment variable

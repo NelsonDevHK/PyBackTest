@@ -2,3 +2,4 @@ pandas >= 2.0
 Matplotlib >= 3.9
 twelvedata
 python-dotenv
+mplfinance

@@ -95,3 +95,4 @@ Minimum candle fields:
 - Save test results per run for reproducibility.
 - Version-control strategy parameter sets.
 
+python -m pip install -r requirements.txt

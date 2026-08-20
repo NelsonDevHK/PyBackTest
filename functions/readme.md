@@ -1,98 +1,206 @@
-# PyBackTest
+# price_action_backtest.py
 
-PyBackTest is a strategy testing project focused on evaluating and improving trading performance before going live.
+This file currently loads historical GOLD candles, converts them to hourly candles for analysis, finds support and resistance zones, and displays the result on a candlestick chart.
 
-## Project Goal
+It does not place trades and it does not connect to MT5. The data must already exist in `5MinutesData`.
 
-The main goal of this project is to:
+## Run The File
 
-- Test the overall strategy in a structured way.
-- Tune parameters to improve win rate and stability.
-- Move the best-performing version into live execution.
+From the `functions` folder:
 
-## Current Stage
-
-Phase 1 focuses on **Price Action testing**.
-
-This includes:
-
-- Defining clear entry and exit rules from price behavior.
-- Backtesting on historical candles.
-- Measuring win rate, drawdown, and consistency.
-
-More strategy modules will be added in the next phases.
-
-## Project Status
-
-- In progress
-- First milestone: Price Action backtest baseline
-- To be continued with additional strategies
-
-## Quick Start
-
-1. Make sure Python is installed.
-2. Run:
-
-```bash
-python main.py
+```powershell
+python price_action_backtest.py --symbol GOLD --timeframe m5 --start-date 2026-08-10 --end-date 2026-08-14
 ```
 
-Current `main.py` is a starter file and will be expanded with backtesting logic.
+If the virtual environment is not activated, use:
 
-## Data Requirement (Priority)
+```powershell
+..\.venv\Scripts\python.exe price_action_backtest.py --symbol GOLD --timeframe m5 --start-date 2026-08-10 --end-date 2026-08-14
+```
 
-Preferred market data for this project:
+The end date is included.
 
-1. XAUUSD 15-minute candles
-2. XAUUSD 1-hour candles
-3. If unavailable, use another reliable gold-related dataset as fallback
+## Expected CSV Columns
 
-Minimum candle fields:
+Required columns:
 
-- Timestamp (UTC preferred)
-- Open
-- High
-- Low
-- Close
-- Volume (optional but useful)
+```text
+datetime, open, high, low, close
+```
 
-## Recommended Data Sources
+Optional MT5 columns:
 
-### Priority A: XAUUSD (15m / 1h)
+```text
+tick_volume, spread, real_volume
+```
 
-1. Dukascopy Historical Data Export
-	- Link: https://www.dukascopy.com/swiss/english/marketwatch/historical/
-	- Notes: Reliable historical market source. You can export and then resample/use 15m and 1h candles.
+## Function Flow
 
-2. Kaggle XAUUSD datasets (community maintained)
-	- Link: https://www.kaggle.com/search?q=XAUUSD
-	- Notes: Good for quick start. Verify timeframe columns and data quality before use.
+```text
+parse_args()
+	-> load_data()
+	-> plot_candles()
+		-> get_support_resistance()
+			-> OneHour_df()
+```
 
-### Priority B: API-based alternatives
+## `load_data()`
 
-3. Alpha Vantage FX intraday / gold endpoints
-	- Docs: https://www.alphavantage.co/documentation/
-	- Notes: Supports 15min and 60min intervals for FX APIs. Check symbol support and plan limits.
+```python
+load_data(symbol, timeframe, start_date, end_date)
+```
 
-## Suggested First Dataset Workflow
+Loads matching daily CSV files from `5MinutesData`, keeps files inside the requested date range, converts `datetime`, combines the files, and sorts them chronologically.
 
-1. Try Dukascopy export for XAUUSD first.
-2. Validate candle continuity and timezone.
-3. If you need a faster start, use a Kaggle XAUUSD dataset that already has 15m or 1h candles.
-4. Standardize all files into one schema before backtesting.
+Example:
+
+```python
+df = load_data("GOLD", "m5", "2026-08-10", "2026-08-14")
+```
+
+## `OneHour_df()`
+
+```python
+OneHour_df(df, title="")
+```
+
+Converts the loaded candles into one-hour OHLC candles:
+
+```python
+df.resample("1h").agg({
+	"open": "first",
+	"high": "max",
+	"low": "min",
+	"close": "last",
+})
+```
+
+The `title` argument is currently retained for compatibility but is not used in the calculation.
+
+The chart can remain M5 while support and resistance are calculated from H1 data.
+
+## `get_support_resistance()`
+
+```python
+get_support_resistance(
+	df,
+	zone_threshold=5.0,
+	reaction_candles=10,
+	min_touches=3,
+)
+```
+
+Finds price zones that cause a meaningful move away and are later retested. It analyzes the H1 candles created by `OneHour_df()`.
+
+### Parameters
+
+- `zone_threshold=5.0`: approximately ±5 price units around a zone center.
+- `reaction_candles=10`: number of later hourly candles checked for a reaction.
+- `min_touches=3`: minimum number of directional reactions required for selection.
+
+Zone centers are spaced by 10 points so neighboring ±5 zones do not overlap.
+
+Example:
+
+```text
+Center: 4320
+Zone:   4315 to 4325
+```
+
+### Touch logic
+
+Only the first hourly candle entering a zone from outside counts as a touch. Candles that remain inside the zone do not create extra touches.
+
+### Reaction logic
+
+For each touch, the next 10 hourly closes are checked:
+
+- Move above the zone: support reaction.
+- Move below the zone: resistance reaction.
+- Both directions: ambiguous touch, ignored.
+
+### Retest logic
+
+After the price leaves the zone, later hourly closes are checked. A return inside the zone counts as a retest.
+
+Retests are ranked more strongly than raw touches because they show that the level was respected, left, and tested again.
+
+### Candidate selection
+
+- Support candidates must be in the lower quarter of the hourly range.
+- Resistance candidates must be in the upper quarter.
+- Retest count is ranked first.
+- Directional touch count breaks ties.
+
+The result has this structure:
+
+```python
+{
+	"support": {
+		"center": 4320,
+		"support_touches": 3,
+		"support_retests": 2,
+	},
+	"resistance": {
+		"center": 4430,
+		"resistance_touches": 3,
+		"resistance_retests": 2,
+	},
+}
+```
+
+If no qualifying zone exists, the value is `None`.
+
+## `plot_candles()`
+
+```python
+plot_candles(df, title)
+```
+
+Displays the original requested timeframe as candlesticks and draws the selected levels.
+
+- Candles remain M5 when `--timeframe m5` is used.
+- Analysis uses H1 candles.
+- Support and resistance lines are both blue.
+- The legend shows directional touch counts.
+- No PNG file is saved.
+
+## `parse_args()`
+
+Defines the command-line options:
+
+```text
+--symbol       default: GOLD
+--timeframe    default: m5
+--start-date   default: 2026-07-27
+--end-date     default: 2026-07-31
+```
+
+The values are passed to `load_data()` by `main()`.
+
+## `main()`
+
+Runs the workflow:
+
+1. Read command-line arguments.
+2. Load the selected CSV data.
+3. Draw the candlestick chart.
+4. Calculate hourly support and resistance.
+5. Display the chart.
+
+## Current Limitations
+
+- Trend detection is not implemented yet.
+- Fibonacci levels are not implemented yet.
+- Entry, TP, and SL rules are not implemented yet.
+- Historical trade simulation is not implemented yet.
+- The levels are based on candle prices, not order-book data.
+- A short date range may not contain enough hourly candles for reliable retests.
 
 ## Next Development Steps
 
-1. Build data loader and cleaner.
-2. Implement backtest engine (entry, exit, SL/TP, fees/spread).
-3. Add performance report (win rate, RR, drawdown, expectancy).
-4. Add parameter tuning loop.
-5. Prepare paper/live deployment module.
-
-## Notes for Collaboration
-
-- Keep strategy logic isolated from data loading.
-- Save test results per run for reproducibility.
-- Version-control strategy parameter sets.
-
-python -m pip install -r requirements.txt
+1. Add trend classification.
+2. Add Fibonacci levels at `0`, `0.618`, `0.88`, `1`, and `-0.272`.
+3. Define entry, TP, and SL rules.
+4. Simulate historical trades candle by candle.
+5. Add win rate, net result, drawdown, and average R reporting.

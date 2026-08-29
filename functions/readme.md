@@ -1,24 +1,63 @@
-# price_action_backtest.py
+# Price Action Channel Analysis
 
-This file currently loads historical GOLD candles, converts them to hourly candles for analysis, finds support and resistance zones, and displays the result on a candlestick chart.
+The active workflow is centered on a single shared channel detector:
 
-It does not place trades and it does not connect to MT5. The data must already exist in `5MinutesData`.
+- `price_action_historical.py`: reads historical candles directly from MT5 without saving CSV files and plots the detected support/resistance channel.
+- `price_action_logic.py`: contains the reusable channel logic, including `get_channel()` and `OneHour_df()`.
+- `all_pattern.py`: older compatibility/testing script; it is not the primary historical workflow anymore.
 
-## Run The File
+## Local CSV Review
 
-From the `functions` folder:
+Use this when the data already exists in `5MinutesData`:
 
 ```powershell
-python price_action_backtest.py --symbol GOLD --timeframe m5 --start-date 2026-08-10 --end-date 2026-08-14
+python price_action_local.py --symbol GOLD --timeframe m5 --start-date 2026-08-10 --end-date 2026-08-14
 ```
 
 If the virtual environment is not activated, use:
 
 ```powershell
-..\.venv\Scripts\python.exe price_action_backtest.py --symbol GOLD --timeframe m5 --start-date 2026-08-10 --end-date 2026-08-14
+..\.venv\Scripts\python.exe price_action_local.py --symbol GOLD --timeframe m5 --start-date 2026-08-10 --end-date 2026-08-14
 ```
 
-The end date is included.
+## Direct MT5 Historical Review
+
+Use this when you want MT5 to provide the historical candles directly:
+
+```powershell
+python price_action_historical.py --symbol GOLD --timeframe h1 --start-date 2026-08-03 --end-date 2026-08-07
+```
+
+This script:
+
+1. Connects to the configured MT5 account.
+2. Requests the exact date range from MT5.
+3. Plots the returned candles.
+4. Runs the channel analysis.
+5. Does not save the returned data as CSV.
+
+The date range is controlled entirely by the command. It is not fixed to one week. The end date is included.
+
+## Main Historical Workflow
+
+Use the direct MT5 chart script for the active workflow:
+
+```powershell
+python price_action_historical.py --symbol GOLD --timeframe m5 --start-date 2026-08-10 --end-date 2026-08-14
+```
+
+This script:
+
+1. Connects to the configured MT5 account.
+2. Loads the requested date range directly from MT5.
+3. Draws the candlestick chart.
+4. Runs the current channel detector via `get_channel()`.
+5. Draws the detected support/resistance lines in red.
+6. Does not save the returned data as CSV.
+
+The date range is controlled entirely by the command. It is not fixed to one week, and the end date is included.
+
+> The older four-touch all-pattern scanner is kept mainly as a deferred/legacy experiment. The primary and working path is the historical channel workflow.
 
 ## Expected CSV Columns
 
@@ -34,17 +73,17 @@ Optional MT5 columns:
 tick_volume, spread, real_volume
 ```
 
-## Function Flow
+## Shared Function Flow
 
 ```text
 parse_args()
-	-> load_data()
+	-> load_data() or load_mt5_data()
 	-> plot_candles()
-		-> get_support_resistance()
+		-> get_channel()
 			-> OneHour_df()
 ```
 
-## `load_data()`
+## Local `load_data()`
 
 ```python
 load_data(symbol, timeframe, start_date, end_date)
@@ -57,6 +96,18 @@ Example:
 ```python
 df = load_data("GOLD", "m5", "2026-08-10", "2026-08-14")
 ```
+
+## `load_mt5_data()`
+
+```python
+load_mt5_data(symbol, timeframe, start_date, end_date)
+```
+
+Requests historical bars directly from MT5 using `copy_rates_range()`.
+
+It converts MT5 timestamps into the project `datetime` column, keeps only the requested range, sorts the rows, and returns a DataFrame in memory.
+
+No downloaded CSV is created.
 
 ## `OneHour_df()`
 
@@ -79,10 +130,10 @@ The `title` argument is currently retained for compatibility but is not used in 
 
 The chart can remain M5 while support and resistance are calculated from H1 data.
 
-## `get_support_resistance()`
+## `get_channel()`
 
 ```python
-get_support_resistance(
+get_channel(
 	df,
 	zone_threshold=5.0,
 	reaction_candles=10,
@@ -90,7 +141,9 @@ get_support_resistance(
 )
 ```
 
-Finds price zones that cause a meaningful move away and are later retested. It analyzes the H1 candles created by `OneHour_df()`.
+Finds the best support and resistance zone candidate for the selected historical window. It analyzes H1 candles created by `OneHour_df()`. The result contains the strongest support level and the strongest resistance level, each with its touch and retest counters.
+
+This is the active function name in the current codebase. Older scripts may still mention `get_support_resistance()`, but the main logic now lives in `get_channel()` directly.
 
 ### Parameters
 
@@ -157,17 +210,18 @@ If no qualifying zone exists, the value is `None`.
 plot_candles(df, title)
 ```
 
-Displays the original requested timeframe as candlesticks and draws the selected levels.
+Displays candles and draws the detected channel.
 
-- Candles remain M5 when `--timeframe m5` is used.
-- Analysis uses H1 candles.
-- Support and resistance lines are both blue.
-- The legend shows directional touch counts.
+- Local plotting uses the requested CSV timeframe.
+- Direct historical plotting uses the requested MT5 timeframe.
+- Channel analysis uses H1 candles.
+- Support and resistance lines are both red.
+- The legend shows touch counts for the selected support and resistance levels.
 - No PNG file is saved.
 
 ## `parse_args()`
 
-Defines the command-line options:
+`price_action_logic.py` defines:
 
 ```text
 --symbol       default: GOLD
@@ -178,19 +232,22 @@ Defines the command-line options:
 
 The values are passed to `load_data()` by `main()`.
 
+`price_action_historical.py` defines the same date arguments, but uses `load_mt5_data()` instead.
+
 ## `main()`
 
 Runs the workflow:
 
 1. Read command-line arguments.
-2. Load the selected CSV data.
+2. Load local CSV data or direct MT5 data.
 3. Draw the candlestick chart.
-4. Calculate hourly support and resistance.
+4. Calculate the channel.
 5. Display the chart.
 
 ## Current Limitations
 
-- Trend detection is not implemented yet.
+- The current detector is a support/resistance zone finder, not a full trade engine.
+- A valid channel is treated as a sideways zone by the current logic.
 - Fibonacci levels are not implemented yet.
 - Entry, TP, and SL rules are not implemented yet.
 - Historical trade simulation is not implemented yet.
@@ -199,8 +256,7 @@ Runs the workflow:
 
 ## Next Development Steps
 
-1. Add trend classification.
-2. Add Fibonacci levels at `0`, `0.618`, `0.88`, `1`, and `-0.272`.
+1. Add Fibonacci levels at `0`, `0.618`, `0.88`, `1`, and `-0.272`.
 3. Define entry, TP, and SL rules.
 4. Simulate historical trades candle by candle.
 5. Add win rate, net result, drawdown, and average R reporting.

@@ -40,6 +40,82 @@ def load_mt5_data(symbol: str, timeframe: str, start_date: date, end_date: date)
     return df.sort_values("datetime").reset_index(drop=True)
 
 
+def simulate_trade(
+    df: pd.DataFrame,
+    channel: dict,
+    reward_risk: float = 2.5,
+) -> dict | None:
+    """Enter on the channel-confirming candle and resolve the trade forward."""
+    confirmation_time = channel.get("confirmation_time")
+    touches = channel.get("touches", [])
+    if confirmation_time is None or not touches or reward_risk <= 0:
+        return None
+
+    entry_index = df.index[df["datetime"] == confirmation_time]
+    if len(entry_index) == 0:
+        return None
+
+    entry_index = int(entry_index[0])
+    channel_index = df.index[df["datetime"] == confirmation_time]
+    projected_index = int(channel_index[0])
+    upper = float(channel["upper"][projected_index])
+    lower = float(channel["lower"][projected_index])
+    confirmation_touch = next(
+        (touch for touch in touches if touch[0] == confirmation_time),
+        None,
+    )
+    if confirmation_touch is None:
+        return None
+    side = confirmation_touch[1]
+    direction = "short" if side == "resistance" else "long"
+    entry = float(df.loc[entry_index, "close"])
+    target = lower if direction == "short" else upper
+    risk = abs(target - entry) / reward_risk
+    stop = entry + risk if direction == "short" else entry - risk
+
+    for index in range(entry_index, len(df)):
+        candle = df.iloc[index]
+        hit_target = candle["low"] <= target if direction == "long" else candle["high"] >= target
+        hit_stop = candle["low"] <= stop if direction == "long" else candle["high"] >= stop
+        if hit_target and hit_stop:
+            result = "loss"
+            exit_price = stop
+            exit_reason = "stop_and_target_same_candle_stop_first"
+        elif hit_target:
+            result = "win"
+            exit_price = target
+            exit_reason = "target"
+        elif hit_stop:
+            result = "loss"
+            exit_price = stop
+            exit_reason = "stop"
+        else:
+            continue
+        return {
+            "entry_time": confirmation_time,
+            "entry": entry,
+            "direction": direction,
+            "target": target,
+            "stop": stop,
+            "exit_time": candle["datetime"],
+            "exit": exit_price,
+            "result": result,
+            "exit_reason": exit_reason,
+        }
+
+    return {
+        "entry_time": confirmation_time,
+        "entry": entry,
+        "direction": direction,
+        "target": target,
+        "stop": stop,
+        "exit_time": None,
+        "exit": None,
+        "result": "open",
+        "exit_reason": "week_ended",
+    }
+
+
 def plot_candles(df: pd.DataFrame, symbol: str, timeframe: str, start_date: date, end_date: date):
     fig, ax = plt.subplots(figsize=(14, 6), facecolor="black")
     ax.set_facecolor("black")
@@ -65,32 +141,38 @@ def plot_candles(df: pd.DataFrame, symbol: str, timeframe: str, start_date: date
     channel = get_channel(df)
     support = channel["support"] if isinstance(channel, dict) and channel is not None and "support" in channel else None
     resistance = channel["resistance"] if isinstance(channel, dict) and channel is not None and "resistance" in channel else None
-    structure = "sideway_channel" if support is not None and resistance is not None else "no_channel"
+    structure = channel.get("structure", "no_channel") if isinstance(channel, dict) else "no_channel"
     print(f"Source: MT5 historical data")
     print(f"Range: {start_date} to {end_date}")
-    print(f"Trend: {'sideway' if support is not None and resistance is not None else 'no_channel'} ({structure})")
+    print(f"Trend: {structure}")
+    if "slope" in channel:
+        print(f"M5 slope: {channel['slope']:.4f} price units per candle")
 
-    if support is not None:
+    is_confirmed_channel = structure != "no_channel" and "x" in channel and channel["x"] is not None
+    if support is not None and not is_confirmed_channel:
         ax.axhline(support["center"], color="red", linewidth=1.5, label=f"Support ({support['support_touches']} touches)")
-    if resistance is not None:
+    if resistance is not None and not is_confirmed_channel:
         ax.axhline(resistance["center"], color="red", linewidth=1.5, label=f"Resistance ({resistance['resistance_touches']} touches)")
 
-    if isinstance(channel, dict) and channel is not None and "structure" in channel and "x" in channel:
+    if is_confirmed_channel:
         channel_x = mdates.date2num(channel["x"])
-        ax.plot(channel_x, channel["upper"], color="white", linewidth=1.2, label="H1 channel")
+        channel_label = "sideway channel" if structure == "sideway_channel" else f"{structure} (M5 body)"
+        ax.plot(channel_x, channel["upper"], color="white", linewidth=1.2, label=channel_label)
         ax.plot(channel_x, channel["lower"], color="white", linewidth=1.2)
         if "touches" in channel and len(channel["touches"]) >= 4:
-            fourth_index, fourth_side, _ = channel["touches"][3]
-            fourth_price = df.loc[fourth_index, "high"] if fourth_side == "resistance" else df.loc[fourth_index, "low"]
-            ax.scatter(
-                channel["confirmation_time"],
-                fourth_price,
-                color="yellow",
-                s=60,
-                zorder=5,
-                label="4th H1 touch: channel confirmed",
-            )
-            print(f"Channel confirmed on H1 candle: {channel['confirmation_time']}")
+            entry_candles = df[df["datetime"] > channel["confirmation_time"]]
+            if not entry_candles.empty:
+                entry_candle = entry_candles.iloc[0]
+                ax.scatter(
+                    entry_candle["datetime"],
+                    entry_candle["close"],
+                    color="yellow",
+                    s=60,
+                    zorder=5,
+                    label="First candle after channel confirmation",
+                )
+                print(f"Channel confirmed: {channel['confirmation_time']}")
+                print(f"First eligible entry candle: {entry_candle['datetime']}")
 
     ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m-%d %H:%M"))
     fig.autofmt_xdate()

@@ -141,7 +141,7 @@ get_channel(
 )
 ```
 
-Finds the best support and resistance zone candidate for the selected historical window. It analyzes H1 candles created by `OneHour_df()`. The result contains the strongest support level and the strongest resistance level, each with its touch and retest counters.
+Uses the loaded M5 candles to establish a channel from Monday through Wednesday. A confirmed ascending or descending channel is projected over the requested chart so it can be used from Thursday onward. If no sloping channel qualifies, it falls back to the existing horizontal support/resistance zone search.
 
 This is the active function name in the current codebase. Older scripts may still mention `get_support_resistance()`, but the main logic now lives in `get_channel()` directly.
 
@@ -163,6 +163,19 @@ Zone:   4315 to 4325
 ### Touch logic
 
 Only the first hourly candle entering a zone from outside counts as a touch. Candles that remain inside the zone do not create extra touches.
+
+### Sloping channel logic
+
+The detector uses only Monday, Tuesday, and Wednesday M5 candles to find swing highs and swing lows. It uses candle bodies only: resistance is `max(open, close)` and support is `min(open, close)`, so wick spikes do not move the channel lines. A 12-candle (one-hour) swing window and a one-hour minimum gap between touches filter M5 noise. It evaluates:
+
+- Descending channel: two lower swing highs establish a negative upper-line slope.
+- Ascending channel: two higher swing lows establish a positive lower-line slope.
+
+The opposite boundary is drawn parallel to the anchor line and fitted to contain all setup candles. Each boundary needs at least two swing-point touches, for a minimum of four total touches. The fourth chronological touch confirms the channel. The lines are then extended through Thursday and Friday, while no later candles can influence the channel's shape.
+
+### Sideways channel confirmation
+
+The existing horizontal support and resistance zones are also treated as a channel when the selected support and resistance each have at least two directional touches. The channel confirms at the first point where both boundaries have reached two touches; four resistance touches alone cannot confirm a channel. For every confirmed channel type, the yellow dot is drawn on the close of the next M5 candle after confirmation. Confirmed boundaries are drawn white and extended over the rest of the requested chart. A red line means only an unconfirmed support or resistance level was found.
 
 ### Reaction logic
 
@@ -247,7 +260,7 @@ Runs the workflow:
 ## Current Limitations
 
 - The current detector is a support/resistance zone finder, not a full trade engine.
-- A valid channel is treated as a sideways zone by the current logic.
+- A sloping channel needs enough clear M5 body swing points during Monday-Wednesday; otherwise the detector can only return a horizontal zone or no channel.
 - Fibonacci levels are not implemented yet.
 - Entry, TP, and SL rules are not implemented yet.
 - Historical trade simulation is not implemented yet.
